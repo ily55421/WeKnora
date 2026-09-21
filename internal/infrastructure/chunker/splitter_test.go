@@ -198,6 +198,36 @@ func TestSplitText_RecursiveSeparators_NoOversizeChunks(t *testing.T) {
 	}
 }
 
+// TestSplitText_ProtectedCodeBlockRespectsChunkBudget is the regression test
+// for the VECTORSTORE_WRITE_FAILED bug: a fenced code block far larger than
+// the chunk budget used to survive as a single 7000+ rune chunk because the
+// protected-unit ceiling was a fixed 7500 that ignored chunkSize entirely.
+// Embedding backends with hard per-input token caps (llama.cpp physical batch
+// 512) rejected the entire batch, failing the whole document with
+// "input (N tokens) is too large to process".
+func TestSplitText_ProtectedCodeBlockRespectsChunkBudget(t *testing.T) {
+	line := "    self.process(record)  # 处理每条检修记录并更新图谱\n"
+	// ~7000-rune fenced block, mirroring the real-world failure document.
+	code := "```python\nclass PowerGraphBuilder:\n" + strings.Repeat(line, 170) + "```\n"
+	text := "# 电力检修知识图谱构建方案\n\n" + code + "\n\n## 小结\n\n方案落地需要分阶段推进。\n"
+	cfg := SplitterConfig{ChunkSize: 384, ChunkOverlap: 76, Separators: []string{"\n\n", "\n", "。"}}
+
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 5 {
+		t.Fatalf("oversize protected block should be split into many chunks, got %d", len(chunks))
+	}
+	ceiling := protectedUnitCeiling(cfg.ChunkSize)
+	for i, c := range chunks {
+		l := len([]rune(c.Content))
+		if l > ceiling+cfg.ChunkOverlap {
+			t.Errorf("chunk %d is %d runes; want <= ceiling %d + overlap %d", i, l, ceiling, cfg.ChunkOverlap)
+		}
+		if c.End-c.Start != l {
+			t.Errorf("chunk %d position invariant broken: span=%d content=%d", i, c.End-c.Start, l)
+		}
+	}
+}
+
 func TestSplitText_Empty(t *testing.T) {
 	chunks := SplitText("", DefaultConfig())
 	if len(chunks) != 0 {

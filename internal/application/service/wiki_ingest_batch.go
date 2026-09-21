@@ -270,12 +270,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	//     nothing.
 	if s.redisClient == nil {
 		mode = "lite"
-		if _, loaded := s.liteLocks.LoadOrStore(payload.KnowledgeBaseID, struct{}{}); loaded {
-			exitStatus = "active_lock_conflict"
-			logger.Infof(ctx, "wiki ingest: another batch active for KB %s (lite lock), deferring to asynq retry", payload.KnowledgeBaseID)
-			return ErrWikiIngestConcurrent
+		// Wait our turn for the per-KB lock instead of fail-fasting. Returning
+		// ErrWikiIngestConcurrent here made the Lite SyncTask burn its whole
+		// retry budget on a task that could never proceed while a slow batch
+		// held the lock, and — once every trigger exhausted — strand the durable
+		// ops with no live trigger. See acquireLiteLock.
+		release, acquired := s.acquireLiteLock(ctx, payload.KnowledgeBaseID)
+		if !acquired {
+			exitStatus = "lock_wait_aborted"
+			logger.Infof(ctx, "wiki ingest: gave up waiting for per-KB lite lock (>=%s or ctx done) for KB %s; durable ops stay queued for the holder's follow-up / next trigger", wikiLiteLockMaxWait, payload.KnowledgeBaseID)
+			return nil
 		}
-		defer s.liteLocks.Delete(payload.KnowledgeBaseID)
+		defer release()
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)

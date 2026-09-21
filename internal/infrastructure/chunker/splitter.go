@@ -297,15 +297,47 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	return mergeUnits(units, chunkSize, chunkOverlap)
 }
 
+// protectedUnitCeiling returns the rune ceiling for a single protected unit —
+// a fenced code block, Markdown table, LaTeX block or similar atomic span.
+//
+// Protected spans are kept whole so structural content is not cut mid-block,
+// but "whole" must not mean "unbounded": every chunk this package emits is
+// eventually fed to an embedding backend, many of which enforce a hard
+// per-input token cap (llama.cpp, for instance, rejects any input beyond its
+// physical batch size with HTTP 500, which fails the whole document). The
+// legacy fixed ceiling of 7500 runes ignored the caller's chunk budget
+// entirely, so a child-chunk config of 384 runes happily emitted 7000+ rune
+// code blocks that no embedding backend accepts.
+//
+// The ceiling therefore tracks the caller's own budget — chunkSize plus a
+// 25% allowance so moderately larger atomic blocks survive whole — clamped
+// between a 256 floor (tiny-chunk configs must not shred single-line blocks)
+// and the historical 7500 maximum (parent chunks keep a wide context window).
+func protectedUnitCeiling(chunkSize int) int {
+	const (
+		absoluteCeiling = 7500
+		minCeiling      = 256
+	)
+	ceiling := chunkSize + chunkSize/4
+	if ceiling < minCeiling {
+		ceiling = minCeiling
+	}
+	if ceiling > absoluteCeiling {
+		ceiling = absoluteCeiling
+	}
+	return ceiling
+}
+
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
 // Start/End positions in the returned units are rune offsets (not byte offsets),
 // because downstream merge logic indexes content via []rune slicing.
-// If a protected span exceeds maxProtectedSize, it will be forcibly split to prevent
-// creating chunks that are too large for downstream processing (e.g., embedding APIs).
+// If a protected span exceeds the chunkSize-derived ceiling (protectedUnitCeiling),
+// it will be forcibly split to prevent creating chunks that are too large for
+// downstream processing (e.g., embedding APIs with hard per-input token caps).
 // chunkSize is forwarded to splitBySeparators so recursive splitting can keep pieces
 // under the budget when one separator alone leaves a piece oversize.
 func buildUnitsWithProtection(text string, protected []span, separators []string, chunkSize int) []splitUnit {
-	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
+	maxProtectedSize := protectedUnitCeiling(chunkSize)
 
 	var units []splitUnit
 	bytePos := 0

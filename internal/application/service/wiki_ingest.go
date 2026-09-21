@@ -160,6 +160,21 @@ return proposed
 	// asynqRetryDelayFunc, and follow-up/retract paths fire quickly.
 	wikiIngestMaxRetry = 10
 
+	// wikiLiteLockPollInterval is how often a Lite-mode wiki:ingest batch
+	// re-checks the per-KB exclusive lock while waiting for the batch that
+	// currently holds it to release.
+	wikiLiteLockPollInterval = 2 * time.Second
+
+	// wikiLiteLockMaxWait bounds how long a Lite-mode batch blocks waiting for
+	// the per-KB lock before giving up. It must comfortably exceed the longest
+	// plausible batch (a full 5-doc batch against a slow/flaky LLM) so healthy
+	// batches simply queue behind each other, while a wedged lock-holder cannot
+	// pin an unbounded number of waiter goroutines forever. On timeout the batch
+	// returns nil (NOT an error), so the durable op stays in task_pending_ops and
+	// is re-triggered by the holder's end-of-batch follow-up, the next upload, or
+	// startup recovery — no document is ever stranded.
+	wikiLiteLockMaxWait = 20 * time.Minute
+
 	// wikiDeletedKeyPrefix is the Redis key prefix for "recently deleted
 	// knowledge" tombstones. Key: wiki:deleted:{kbID}:{knowledgeID}. Written
 	// by cleanupWikiOnKnowledgeDelete so that any wiki_ingest task still in
@@ -1163,6 +1178,45 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
 	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+}
+
+// acquireLiteLock waits for the Lite-mode per-KB exclusive lock, replacing the
+// old fail-fast behaviour that returned ErrWikiIngestConcurrent. That made the
+// Lite SyncTask retry loop burn its whole budget (up to 25 attempts) re-running
+// a task that could never proceed while a slow batch — typically one grinding
+// against a rate-limiting / 504-ing LLM — held the lock. The storm both wasted
+// CPU and, once every trigger's budget was exhausted, left the still-durable
+// op with no live trigger to drain it, stranding the parent knowledge in
+// "finalizing" forever (housekeeping also skips it because the durable op
+// exists).
+//
+// Blocking-with-poll turns the storm into a simple queue: the waiter sleeps
+// until the holder releases, then runs a normal batch that drains / dead-letters
+// the durable ops and decrements each knowledge's pending_subtasks_count.
+//
+// Returns (release, true) once the lock is held — the caller MUST call release
+// (normally `defer release()`). Returns (nil, false) if ctx is cancelled or
+// wikiLiteLockMaxWait elapses first; the caller then returns nil so no error
+// storm is triggered, relying on the holder's follow-up / next upload / restart
+// recovery to re-trigger the still-durable ops.
+func (s *wikiIngestService) acquireLiteLock(ctx context.Context, kbID string) (func(), bool) {
+	deadline := time.Now().Add(wikiLiteLockMaxWait)
+	for {
+		if _, loaded := s.liteLocks.LoadOrStore(kbID, struct{}{}); !loaded {
+			return func() { s.liteLocks.Delete(kbID) }, true
+		}
+		if !time.Now().Before(deadline) {
+			return nil, false
+		}
+		timer := time.NewTimer(wikiLiteLockPollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false
+		case <-timer.C:
+			timer.Stop()
+		}
+	}
 }
 
 // requeueFailedOps records in-batch failures.
