@@ -31,6 +31,7 @@ logs/
 WeKnora
 WeKnora-lite
 cmd/desktop/build/bin/
+WeKnora-lite.exe*
 /models/
 test/data/mswag.txt
 data/files/
@@ -50,6 +51,7 @@ WeKnora-Chrome-Extension
 packages/protoc-3.19.4-linux-x86_64.zip
 
 Claude.md
+CODELY.md
 
 # 本地测试脚本
 configure-ollama.sh

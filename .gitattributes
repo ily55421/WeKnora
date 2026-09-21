@@ -4,6 +4,12 @@
 # (with default core.autocrlf=true) don't trip byte-equal comparisons in
 # acceptance/contract envelope tests.
 *.go text eol=lf
+
+# Source-text contract tests (e.g. SandboxConfigEditorDrawer.network.test.mjs)
+# assert against .vue contents with cross-line regexes, so a CR from a Windows
+# checkout breaks them for no functional reason. Blobs are already LF; this
+# only pins the checkout direction.
+*.vue text eol=lf
 cli/acceptance/testdata/**/*.json text eol=lf
 
 # Trellis: append-only developer journals should merge cleanly across
