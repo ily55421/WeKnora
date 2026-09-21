@@ -224,6 +224,11 @@
                         <t-icon class="menu-icon" name="file-copy" />
                         <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item"
+                        @click.stop="handleCopyWithContentById(kb.id)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.copyWithContent') }}</span>
+                      </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
                           <t-icon class="menu-icon" name="setting" />
@@ -456,6 +461,10 @@
                       <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item" @click.stop="handleDuplicate(kb)">
                         <t-icon class="menu-icon" name="file-copy" />
                         <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item" @click.stop="handleCopyWithContent(kb)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.copyWithContent') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettings(kb)">
@@ -783,7 +792,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, duplicateKnowledgeBase, copyKnowledgeBase, getKBCopyProgress, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
@@ -879,6 +888,11 @@ const highlightedCardRef = ref<HTMLElement | null>(null)
 const uploadTasks = ref<UploadTaskState[]>([])
 const uploadCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | null = null
+// 知识库复制是异步任务（copy 接口返回 task_id），需要轮询进度；同一时刻只允许一个复制任务，
+// 因此用单例定时器而不是 Map，卸载时必须清掉，否则离开页面后仍在打接口。
+let kbCopyPollTimer: ReturnType<typeof setInterval> | null = null
+const KB_COPY_POLL_INTERVAL = 2000
+const KB_COPY_POLL_TIMEOUT = 30 * 60 * 1000
 const UPLOAD_CLEANUP_DELAY = 10000
 
 // Share dialog state
@@ -1299,6 +1313,7 @@ onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploadProgress', handleUploadProgressEvent as EventListener)
   window.removeEventListener('knowledgeFileUploadComplete', handleUploadCompleteEvent as EventListener)
   window.removeEventListener('knowledgeFileUploaded', handleUploadFinishedEvent as EventListener)
+  stopKBCopyPoll()
 
   uploadCleanupTimers.forEach(timer => clearTimeout(timer))
   uploadCleanupTimers.clear()
@@ -1433,6 +1448,14 @@ const handleTogglePinById = async (id: string) => {
   }
 }
 
+const handleCopyWithContent = async (kb: KB) => {
+  kb.showMore = false
+  await copyKBWithContent(kb.id)
+}
+
+const handleCopyWithContentById = async (id: string) => {
+  await copyKBWithContent(id)
+}
 const handleDuplicate = async (kb: KB) => {
   kb.showMore = false
   await duplicateKB(kb.id)
@@ -1457,6 +1480,99 @@ const duplicateKB = async (id: string) => {
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeList.messages.duplicateFailed'))
+  }
+}
+
+// 「创建副本」只复制知识库设置（同步返回，不含知识内容），因此无需轮询。
+// 需要连同知识内容一起复制时必须走异步的 copy 任务，这里用轮询把进度反馈给用户：
+// 该接口是后端唯一暴露复制进度的入口（GET /knowledge-bases/copy/progress/:task_id）。
+//
+// 用独立标志位而不是 kbCopyPollTimer 做并发守卫：定时器是在 copy 请求返回之后才建立的，
+// 若只判断定时器，用户快速点两次会让两个请求都通过检查、排入两个复制任务。
+let kbCopySubmitting = false
+const stopKBCopyPoll = () => {
+  if (kbCopyPollTimer) {
+    clearInterval(kbCopyPollTimer)
+    kbCopyPollTimer = null
+  }
+}
+
+const startKBCopyPoll = (taskId: string) => {
+  stopKBCopyPoll()
+  let notifiedProgress = -1
+  // 兜底：任务若一直不返回终态（后端异常/任务记录被清理），无限轮询会一直打接口，
+  // 因此在超过上限后主动收手并提示用户去列表里核对结果。
+  let elapsed = 0
+  kbCopyPollTimer = setInterval(async () => {
+    elapsed += KB_COPY_POLL_INTERVAL
+    if (elapsed > KB_COPY_POLL_TIMEOUT) {
+      stopKBCopyPoll()
+      MessagePlugin.warning(t('knowledgeList.messages.copyTimeout'))
+      await fetchList(true)
+      return
+    }
+    try {
+      const res: any = await getKBCopyProgress(taskId)
+      const data = res?.data
+      if (!data) return
+
+      if (data.status === 'completed') {
+        stopKBCopyPoll()
+        MessagePlugin.success(t('knowledgeList.messages.copySuccess'))
+        await fetchList(true)
+        // copy 未指定 target_id 时，后端在 worker 里新建知识库，但不会把新库 ID 回写到进度里，
+        // 所以 target_id 通常为空。此时不要退回高亮源知识库——那会让用户以为副本就是原库。
+        if (data.target_id) {
+          triggerHighlightFlash(data.target_id)
+        }
+        return
+      }
+
+      if (data.status === 'failed') {
+        stopKBCopyPoll()
+        MessagePlugin.error(data.error || t('knowledgeList.messages.copyFailed'))
+        return
+      }
+
+      // 进度提示按「10% 一跳」节流：逐个百分点都弹会让长任务刷屏，
+      // 而完全不提示又会让用户以为卡住了。
+      const percent = Math.max(0, Math.min(100, data.progress || 0))
+      const step = Math.floor(percent / 10) * 10
+      if (step > notifiedProgress) {
+        notifiedProgress = step
+        MessagePlugin.info(
+          t('knowledgeList.messages.copyProgress', {
+            percent,
+            processed: data.processed || 0,
+            total: data.total || 0,
+          }),
+        )
+      }
+    } catch {
+      // 单次轮询失败不代表任务失败（可能是网络抖动），交给下一轮重试。
+    }
+  }, KB_COPY_POLL_INTERVAL)
+}
+
+const copyKBWithContent = async (id: string) => {
+  if (kbCopySubmitting || kbCopyPollTimer) {
+    MessagePlugin.warning(t('knowledgeList.messages.copyInProgress'))
+    return
+  }
+  kbCopySubmitting = true
+  try {
+    const res: any = await copyKnowledgeBase({ source_id: id })
+    const taskId = res?.data?.task_id
+    if (res?.success && taskId) {
+      MessagePlugin.info(t('knowledgeList.messages.copyStarted'))
+      startKBCopyPoll(taskId)
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeList.messages.copyFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeList.messages.copyFailed'))
+  } finally {
+    kbCopySubmitting = false
   }
 }
 

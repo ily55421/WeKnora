@@ -1491,8 +1491,9 @@ const doSubmit = async () => {
                 const result: any = await rebuildKBIndex(kbId)
                 const count = result?.data?.document_count ?? 0
                 MessagePlugin.success(t('knowledgeEditor.indexing.rebuildSuccess', { count }))
-              } catch (e) {
+              } catch (e: any) {
                 console.error('Rebuild index failed:', e)
+                MessagePlugin.error(e?.message || t('knowledgeEditor.indexing.rebuildFailed'))
               }
             },
             onCancel: () => {

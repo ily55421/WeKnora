@@ -3956,6 +3956,7 @@ export default {
       rebuildConfirmTitle: '인덱스 재구축',
       rebuildConfirmBody: '인덱싱 전략이 변경되었습니다. 기존 {count}개 문서를 재처리하시겠습니까? 시간이 다소 걸릴 수 있습니다.',
       rebuildSuccess: '재구축 작업이 제출되었습니다. 총 {count}개 문서',
+      rebuildFailed: '인덱스 재구축에 실패했습니다. 나중에 다시 시도해주세요',
       rebuildSkip: '데이터 소스에서 나중에 수동으로 재구축할 수 있습니다'
     },
     wiki: {
@@ -4313,7 +4314,13 @@ export default {
       deleted: '삭제됨',
       deleteFailed: '삭제 실패',
       duplicateSuccess: '지식베이스 복제본이 생성되었습니다(콘텐츠 제외)',
-      duplicateFailed: '지식베이스 복제본 생성 실패'
+      duplicateFailed: '지식베이스 복제본 생성 실패',
+      copyStarted: '지식베이스 복사가 시작되었습니다(콘텐츠 포함). 진행률은 목록에서 확인할 수 있습니다.',
+      copyProgress: '지식베이스 복사 중 {percent}%({processed}/{total})',
+      copySuccess: '지식베이스 복사 완료',
+      copyFailed: '지식베이스 복사 실패',
+      copyInProgress: '이미 복사 작업이 진행 중입니다. 완료될 때까지 기다려 주세요.',
+      copyTimeout: '복사 작업이 너무 오래 걸립니다. 진행률 추적을 중단했습니다. 나중에 목록에서 결과를 확인하세요.',
     },
     sections: {
       pinned: '고정됨',
@@ -4333,7 +4340,8 @@ export default {
     },
     menu: {
       viewDetails: '세부 사항을 확인하세요',
-      duplicate: '복제'
+      duplicate: '복제',
+      copyWithContent: '지식베이스 복사(콘텐츠 포함)'
     },
     delete: {
       confirmTitle: '삭제 확인',

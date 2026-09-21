@@ -3958,6 +3958,7 @@ export default {
       rebuildConfirmTitle: '重建索引',
       rebuildConfirmBody: '索引策略已变更，是否对已有的 {count} 篇文档重新处理？这可能需要一些时间。',
       rebuildSuccess: '已提交重建任务，共 {count} 篇文档',
+      rebuildFailed: '重建索引失败，请稍后重试',
       rebuildSkip: '稍后可在数据源中手动触发重建'
     },
     wiki: {
@@ -4315,7 +4316,13 @@ export default {
       deleted: '已删除',
       deleteFailed: '删除失败',
       duplicateSuccess: '知识库副本已创建（不包含知识内容）',
-      duplicateFailed: '创建知识库副本失败'
+      duplicateFailed: '创建知识库副本失败',
+      copyStarted: '已开始复制知识库（含知识内容），可在列表中查看进度',
+      copyProgress: '正在复制知识库 {percent}%（{processed}/{total}）',
+      copySuccess: '知识库复制完成',
+      copyFailed: '复制知识库失败',
+      copyInProgress: '已有复制任务在进行中，请等待其完成',
+      copyTimeout: '复制任务耗时过长，已停止跟踪进度，请稍后在列表中确认结果',
     },
     sections: {
       pinned: '置顶',
@@ -4335,7 +4342,8 @@ export default {
     },
     menu: {
       viewDetails: '查看详情',
-      duplicate: '创建副本'
+      duplicate: '创建副本',
+      copyWithContent: '复制知识库（含内容）'
     },
     delete: {
       confirmTitle: '删除确认',

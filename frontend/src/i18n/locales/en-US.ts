@@ -2536,7 +2536,8 @@ export default {
     },
     menu: {
       viewDetails: 'View Details',
-      duplicate: 'Duplicate'
+      duplicate: 'Duplicate',
+      copyWithContent: 'Copy with content'
     },
     pin: {
       pin: 'Pin to Top',
@@ -2558,7 +2559,13 @@ export default {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base',
       duplicateSuccess: 'Knowledge base duplicate created (content not included)',
-      duplicateFailed: 'Failed to create knowledge base duplicate'
+      duplicateFailed: 'Failed to create knowledge base duplicate',
+      copyStarted: 'Copy started (content included). Progress is shown in the list.',
+      copyProgress: 'Copying knowledge base {percent}% ({processed}/{total})',
+      copySuccess: 'Knowledge base copied',
+      copyFailed: 'Failed to copy knowledge base',
+      copyInProgress: 'Another copy task is still running. Wait for it to finish.',
+      copyTimeout: 'The copy is taking too long. Progress tracking stopped; check the list later for the result.',
     },
     detail: {
       title: 'Shared Knowledge Base',
@@ -2924,6 +2931,7 @@ export default {
       rebuildConfirmTitle: 'Rebuild Index',
       rebuildConfirmBody: 'Indexing strategy has changed. Re-process {count} existing documents? This may take some time.',
       rebuildSuccess: 'Rebuild task submitted for {count} documents',
+      rebuildFailed: 'Failed to rebuild the index. Please try again later',
       rebuildSkip: 'You can manually trigger a rebuild later from Data Sources'
     },
     wikiBrowser: {

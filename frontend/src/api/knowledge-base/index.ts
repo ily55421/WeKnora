@@ -162,8 +162,38 @@ export function updateKnowledgeBase(id: string, data: {
   return put(`/api/v1/knowledge-bases/${id}`, data);
 }
 
-export function rebuildKBIndex(kbId: string) {
-  return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
+/** 后端 batch-reparse 的单次 ID 上限（knowledge.go 的 maxBatch）。 */
+const KB_REPARSE_MAX_BATCH = 200
+/** 分页枚举的保险上限，避免 total 异常时死循环。 */
+const KB_LIST_MAX_PAGES = 200
+
+/**
+ * 重建整个知识库的索引。
+ *
+ * 后端没有 KB 级 rebuild-index 路由，只有按文档 ID 的 `POST /knowledge/batch-reparse`，
+ * 所以这里先枚举库内全部文档再分片提交。listKnowledgeFiles 省略 folder_path
+ * 即扁平视图，覆盖所有子目录。
+ */
+export async function rebuildKBIndex(kbId: string) {
+  const ids: string[] = [];
+  for (let page = 1; page <= KB_LIST_MAX_PAGES; page += 1) {
+    const res: any = await listKnowledgeFiles(kbId, {
+      page,
+      page_size: KB_REPARSE_MAX_BATCH,
+    });
+    const rows = (res?.data ?? []) as Array<{ id?: string }>;
+    for (const row of rows) {
+      if (row?.id) ids.push(row.id);
+    }
+    const total = Number(res?.total ?? 0);
+    if (rows.length === 0 || ids.length >= total) break;
+  }
+
+  for (let i = 0; i < ids.length; i += KB_REPARSE_MAX_BATCH) {
+    await batchReparseKnowledge(kbId, ids.slice(i, i + KB_REPARSE_MAX_BATCH));
+  }
+
+  return { success: true, data: { document_count: ids.length } };
 }
 
 export function deleteKnowledgeBase(id: string) {
@@ -172,6 +202,26 @@ export function deleteKnowledgeBase(id: string) {
 
 export function copyKnowledgeBase(data: { source_id: string; target_id?: string }) {
   return post(`/api/v1/knowledge-bases/copy`, data);
+}
+// 获取知识库复制进度（copy 为异步任务，前端在发起后轮询该接口）
+export interface KBCloneProgress {
+  task_id: string
+  source_id: string
+  target_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  progress: number
+  total: number
+  processed: number
+  message: string
+  error: string
+  created_at: number
+  updated_at: number
+}
+
+export function getKBCopyProgress(taskId: string): Promise<{ data: KBCloneProgress }> {
+  return get(`/api/v1/knowledge-bases/copy/progress/${taskId}`) as unknown as Promise<{
+    data: KBCloneProgress
+  }>
 }
 
 export function duplicateKnowledgeBase(id: string) {
