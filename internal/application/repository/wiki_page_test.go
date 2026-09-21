@@ -17,8 +17,9 @@ import (
 
 // wikiPagesTestDDL is a minimal SQLite-compatible subset of the
 // production wiki_pages DDL (migrations/versioned/000037_wiki_and_indexing.up.sql).
-// JSONB is stored as TEXT in SQLite; the StringArray Scan/Value pair
-// handles the JSON round-trip unchanged.
+// JSONB is stored as TEXT in SQLite. GORM binds a StringArray as a BLOB, so the
+// rows it writes come back as []byte here; rows written as TEXT (the column
+// default, raw SQL) come back as string. StringArray.Scan handles both.
 const wikiPagesTestDDL = `
 CREATE TABLE IF NOT EXISTS wiki_pages (
     id                VARCHAR(36) PRIMARY KEY,

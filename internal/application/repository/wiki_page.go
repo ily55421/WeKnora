@@ -460,39 +460,59 @@ func (r *wikiPageRepository) ListByTypeLight(
 	return entries, total, nil
 }
 
-// ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
-// Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
-func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
-	// Build the JSON needle safely so arbitrary IDs cannot break out of the
-	// quoted string (e.g. ids containing quotes or backslashes).
+// sourceRefPredicate builds the SQL condition (and its bound args) that matches
+// a row whose source_refs JSON array references the given knowledge id, in
+// either the legacy bare-id form ("id") or the current "id|title" form.
+//
+// Postgres uses the GIN-indexed jsonb containment operator (@>) for the bare-id
+// form and a text LIKE for the "id|title" form. SQLite (Lite mode) and MySQL
+// have neither the @> operator nor the ::jsonb / ::text casts — using them there
+// fails with "unrecognized token: @" and silently breaks the wiki ingest
+// pipeline's existing-page / retract / summary lookups. For those dialects both
+// forms are matched with two text LIKEs against the serialized column. Knowledge
+// ids are fixed-length UUIDs (no LIKE metacharacters), so the quoted-id LIKE
+// cannot false-match a different id.
+func (r *wikiPageRepository) sourceRefPredicate(sourceKnowledgeID string) (string, []interface{}, error) {
 	needle, err := json.Marshal([]string{sourceKnowledgeID})
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return "", nil, fmt.Errorf("marshal source ref needle: %w", err)
 	}
-
-	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
-	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
+	// "id|" JSON string with the trailing quote stripped so LIKE can match into
+	// the title portion of the "id|title" form.
 	prefix, err := json.Marshal(sourceKnowledgeID + "|")
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
+		return "", nil, fmt.Errorf("marshal source ref prefix: %w", err)
 	}
-	// prefix is a JSON string including the surrounding quotes; e.g. "abc|".
-	// We strip the trailing quote so LIKE can continue into the title portion.
 	prefixStr := string(prefix)
 	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 		prefixStr = prefixStr[:len(prefixStr)-1]
 	}
-	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
-	// with %…% to match anywhere in the serialized JSON array.
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+	newLike := "%" + escapeLikePattern(prefixStr) + "%"
 
+	if r.db.Dialector.Name() == "postgres" {
+		return "source_refs @> ?::jsonb OR source_refs::text LIKE ?",
+			[]interface{}{string(needle), newLike}, nil
+	}
+	// Bare-id form as a text LIKE: match the JSON-encoded element "id" exactly.
+	quotedID, err := json.Marshal(sourceKnowledgeID)
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal source ref id: %w", err)
+	}
+	oldLike := "%" + escapeLikePattern(string(quotedID)) + "%"
+	return "source_refs LIKE ? OR source_refs LIKE ?",
+		[]interface{}{oldLike, newLike}, nil
+}
+
+// ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
+// Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
+func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
+	cond, args, err := r.sourceRefPredicate(sourceKnowledgeID)
+	if err != nil {
+		return nil, err
+	}
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ? AND ("+cond+")", append([]interface{}{kbID}, args...)...).
 		Find(&pages).Error; err != nil {
 		return nil, err
 	}
@@ -509,28 +529,14 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // containment branch and idx_wiki_pages_source_refs_text for the legacy
 // text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	cond, args, err := r.sourceRefPredicate(sourceKnowledgeID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return nil, err
 	}
-	prefix, err := json.Marshal(sourceKnowledgeID + "|")
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
-	}
-	prefixStr := string(prefix)
-	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-		prefixStr = prefixStr[:len(prefixStr)-1]
-	}
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
-
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ? AND ("+cond+")", append([]interface{}{kbID}, args...)...).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
 	}
@@ -823,23 +829,12 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if kid == "" {
 			continue
 		}
-		needle, err := json.Marshal([]string{kid})
+		cond, condArgs, err := r.sourceRefPredicate(kid)
 		if err != nil {
-			return nil, fmt.Errorf("marshal kid needle: %w", err)
+			return nil, err
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
-
-		prefix, err := json.Marshal(kid + "|")
-		if err != nil {
-			return nil, fmt.Errorf("marshal kid prefix: %w", err)
-		}
-		prefixStr := string(prefix)
-		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-			prefixStr = prefixStr[:len(prefixStr)-1]
-		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		clauses = append(clauses, "("+cond+")")
+		args = append(args, condArgs...)
 	}
 	if len(clauses) == 0 {
 		return nil, nil

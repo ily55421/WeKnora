@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -242,14 +243,13 @@ func (c StringArray) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to StringArray
+// Scan implements the sql.Scanner interface, used to convert database value to StringArray.
+// The driver hands the column back as []byte on Postgres (jsonb) but as string on
+// SQLite (TEXT), so both must be accepted — see jsonColumnBytes.
 func (c *StringArray) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
+	b, ok, err := jsonColumnBytes(value)
+	if err != nil || !ok {
+		return err
 	}
 	return json.Unmarshal(b, c)
 }
@@ -261,12 +261,9 @@ func (c *SummaryConfig) Value() (driver.Value, error) {
 
 // Scan implements the sql.Scanner interface, used to convert database value to SummaryConfig
 func (c *SummaryConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
+	b, ok, err := jsonColumnBytes(value)
+	if err != nil || !ok {
+		return err
 	}
 	return json.Unmarshal(b, c)
 }
@@ -330,12 +327,36 @@ func (c *ContextConfig) Value() (driver.Value, error) {
 
 // Scan implements the sql.Scanner interface, used to convert database value to ContextConfig
 func (c *ContextConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
+	b, ok, err := jsonColumnBytes(value)
+	if err != nil || !ok {
+		return err
 	}
 	return json.Unmarshal(b, c)
+}
+
+// jsonColumnBytes normalises a JSON column's driver value for json.Unmarshal.
+//
+// Postgres returns jsonb as []byte, but SQLite (Lite mode) returns TEXT as
+// string. Accepting only []byte silently emptied every JSON column read from
+// SQLite: the wiki cleanup path reads a page's source_refs, finds it empty,
+// concludes nothing else references the page and deletes it — so removing one
+// knowledge file destroyed wiki pages other files still shared. A nil or empty
+// value means "no data" and is reported as such rather than as malformed JSON.
+func jsonColumnBytes(value interface{}) ([]byte, bool, error) {
+	if value == nil {
+		return nil, false, nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil, false, fmt.Errorf("cannot scan %T into a JSON column", value)
+	}
+	if len(b) == 0 {
+		return nil, false, nil
+	}
+	return b, true, nil
 }

@@ -261,6 +261,15 @@
                       <t-icon name="file-add" />
                     </button>
                   </t-tooltip>
+                  <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.rebuildLinks')" placement="top">
+                    <button type="button" class="wiki-tab-bar-action"
+                      :disabled="rebuildingLinks"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.rebuildLinks')"
+                      @click.stop="handleRebuildLinks">
+                      <t-loading v-if="rebuildingLinks" size="small" />
+                      <t-icon v-else name="link" />
+                    </button>
+                  </t-tooltip>
                 </div>
               </div>
 
@@ -833,6 +842,7 @@ import {
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
+  rebuildWikiLinks,
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
@@ -993,6 +1003,9 @@ const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)
 const showArrows = ref(true)
+// 重建链接是后端的一次性维护动作：它按当前页面内容重算 [[wiki 链接]] 与反链，
+// 并回写索引页。前端原先没有任何入口，导致 wiki/lint 报出的断链只能靠 API 手动修。
+const rebuildingLinks = ref(false)
 
 // Graph filtering
 const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
@@ -3652,6 +3665,28 @@ function triggerAutoFix() {
   })
 
   startFixSession(prompt)
+}
+
+// Rebuild every page's [[wikilinks]] and backlinks server-side. This is the
+// maintenance action behind the lint findings: after renaming pages or
+// importing content outside the editor, links can point at slugs that no
+// longer exist until the index is rebuilt.
+async function handleRebuildLinks() {
+  if (rebuildingLinks.value) return
+  rebuildingLinks.value = true
+  try {
+    const res: any = await rebuildWikiLinks(props.knowledgeBaseId)
+    if (res?.success === false) {
+      MessagePlugin.error(res?.message || t('knowledgeEditor.wikiBrowser.rebuildLinksFailed'))
+    } else {
+      MessagePlugin.success(t('knowledgeEditor.wikiBrowser.rebuildLinksDone'))
+      await loadPages()
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.rebuildLinksFailed'))
+  } finally {
+    rebuildingLinks.value = false
+  }
 }
 
 async function doSearch() {
