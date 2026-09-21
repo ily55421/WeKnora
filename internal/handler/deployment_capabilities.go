@@ -20,6 +20,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.websearch",
 	"settings.vectorstore",
 	"settings.storage",
+	"settings.evaluation",
 	"settings.sandbox",
 	"settings.sandbox.docker",
 }
@@ -38,17 +39,19 @@ type DeploymentCapabilitiesData struct {
 
 // DeploymentFeatureAvailability mirrors injected backend handlers/services.
 type DeploymentFeatureAvailability struct {
-	Organizations bool
-	Agents        bool
-	IM            bool
-	Embed         bool
-	API           bool
-	MCP           bool
-	WebSearch     bool
-	VectorStore   bool
-	Storage       bool
-	Sandbox       bool
-	SandboxDocker bool
+	Organizations     bool
+	Agents            bool
+	IM                bool
+	Embed             bool
+	API               bool
+	MCP               bool
+	WebSearch         bool
+	VectorStore       bool
+	Storage           bool
+	Evaluation        bool
+	EvaluationDataset bool
+	Sandbox           bool
+	SandboxDocker     bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -78,6 +81,17 @@ func BuildDeploymentCapabilities(
 		sandboxDocker.Reason = "route_not_registered"
 	}
 
+	evaluation := DeploymentCapability{
+		Supported: available.Evaluation && available.EvaluationDataset,
+	}
+	if !available.Evaluation {
+		evaluation.Reason = "route_not_registered"
+	} else if !available.EvaluationDataset {
+		// The evaluator reads ./dataset/samples lazily, so without this the
+		// user only finds out by submitting a run that then fails.
+		evaluation.Reason = "evaluation_dataset_missing"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
@@ -90,6 +104,7 @@ func BuildDeploymentCapabilities(
 			"settings.websearch":      supportedDeploymentCapability(available.WebSearch),
 			"settings.vectorstore":    supportedDeploymentCapability(available.VectorStore),
 			"settings.storage":        supportedDeploymentCapability(available.Storage),
+			"settings.evaluation":     evaluation,
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
 		},

@@ -89,7 +89,9 @@ func readFrontendDeploymentCapabilityKeys() ([]string, error) {
 
 	var keys []string
 	for _, line := range strings.Split(string(match[1]), "\n") {
-		line = strings.TrimSpace(strings.TrimRight(line, ","))
+		// TrimSpace first: a CRLF checkout leaves a trailing \r behind the
+		// comma, so trimming the comma first leaves "'key'," unparsed.
+		line = strings.TrimRight(strings.TrimSpace(line), ",")
 		if line == "" {
 			continue
 		}

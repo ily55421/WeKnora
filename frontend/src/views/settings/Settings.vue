@@ -148,6 +148,11 @@
                     <ParserEngineSettings />
                   </div>
 
+                  <!-- 评测：对知识库跑一次检索+生成的质量评估 -->
+                  <div v-if="currentSection === 'evaluation'" class="section">
+                    <EvaluationSettings />
+                  </div>
+
                   <!-- 存储引擎 -->
                   <div v-if="currentSection === 'storage'" class="section">
                     <StorageEngineSettings />
@@ -248,6 +253,7 @@ import StorageEngineSettings from './StorageBackendSettings.vue'
 import SandboxSettings from './SandboxSettings.vue'
 import SkillSettings from './SkillSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
+import EvaluationSettings from './EvaluationSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
@@ -372,6 +378,7 @@ const navItems = computed(() => {
     { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
+    { key: 'evaluation', icon: 'chart-bar', label: t('evaluation.title') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
     { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
@@ -442,6 +449,7 @@ const navGroups = computed<NavGroup[]>(() => {
         'vectorstore',
         'parser',
         'storage',
+        'evaluation',
         'sandbox',
         'skills',
         'websearch',

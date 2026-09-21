@@ -8,6 +8,7 @@ export const DEPLOYMENT_CAPABILITY_KEYS = [
   'settings.websearch',
   'settings.vectorstore',
   'settings.storage',
+  'settings.evaluation',
   'settings.sandbox',
   'settings.sandbox.docker',
 ] as const
@@ -49,6 +50,9 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   websearch: 'settings.websearch',
   vectorstore: 'settings.vectorstore',
   storage: 'settings.storage',
+  // Without ./dataset/samples a run can only fail after the user submits it,
+  // and submitting one already spends chat/rerank tokens.
+  evaluation: 'settings.evaluation',
   sandbox: 'settings.sandbox',
   // Skills are baked into a sandbox image. Hide the catalog when the
   // deployment has no sandbox support, same as personal skill credentials.

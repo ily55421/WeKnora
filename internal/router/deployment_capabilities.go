@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
@@ -19,9 +20,11 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		WebSearch: params.WebSearchHandler != nil &&
 			params.WebSearchProviderHandler != nil &&
 			params.WebSearchCredentialsHandler != nil,
-		VectorStore:   params.VectorStoreHandler != nil,
-		Storage:       params.StorageBackendHandler != nil,
-		Sandbox:       params.SandboxConfigHandler != nil,
-		SandboxDocker: sandbox.DockerBackendEnabled(),
+		VectorStore:       params.VectorStoreHandler != nil,
+		Storage:           params.StorageBackendHandler != nil,
+		Evaluation:        params.EvaluationHandler != nil,
+		EvaluationDataset: service.DatasetAvailable(),
+		Sandbox:           params.SandboxConfigHandler != nil,
+		SandboxDocker:     sandbox.DockerBackendEnabled(),
 	})
 }

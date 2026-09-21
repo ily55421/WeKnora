@@ -17,6 +17,9 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   vectorstore: 'admin',
   parser: 'admin',
   storage: 'admin',
+  // 跑一次评测会真实调用对话/重排模型（有成本），后端 POST /evaluation 也是 Admin+，
+  // 入口与后端保持一致，避免 viewer 点开就 403。
+  evaluation: 'admin',
   sandbox: 'admin',
   // Install writes a root shell into the sandbox image every session of
   // that config boots. Same Admin+ bar as the sandbox editor itself.

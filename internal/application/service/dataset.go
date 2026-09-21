@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -42,36 +43,60 @@ func (d *DatasetService) GetDatasetByID(ctx context.Context, datasetID string) (
 	logger.Info(ctx, "Start getting dataset by ID")
 	logger.Infof(ctx, "Getting dataset with ID: %s", datasetID)
 
-	dataset := DefaultDataset()
-	dataset.PrintStats(ctx)
-	qaPairs := dataset.Iterate()
+	ds, err := DefaultDataset()
+	if err != nil {
+		logger.Errorf(ctx, "Failed to load evaluation dataset: %v", err)
+		return nil, err
+	}
+	ds.PrintStats(ctx)
+	qaPairs := ds.Iterate()
 
 	logger.Infof(ctx, "Retrieved %d QA pairs from dataset", len(qaPairs))
 	return qaPairs, nil
 }
 
+// defaultDatasetDir holds the bundled QA pairs the evaluator scores against.
+// Lite packages do not ship it, so every read must fail as an error, not a panic.
+const defaultDatasetDir = "./dataset/samples"
+
+// DatasetFiles are the parquet parts that make up the default dataset.
+var DatasetFiles = []string{"queries", "corpus", "answers", "qrels", "qas"}
+
+// DatasetAvailable reports whether the bundled evaluation dataset is present.
+// Lets the deployment capability snapshot hide the evaluation entry up front,
+// instead of letting the user discover it by submitting a doomed run.
+func DatasetAvailable() bool {
+	for _, name := range DatasetFiles {
+		path := fmt.Sprintf("%s/%s.parquet", defaultDatasetDir, name)
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // DefaultDataset loads and initializes the default dataset from parquet files
-func DefaultDataset() dataset {
-	datasetDir := "./dataset/samples"
+func DefaultDataset() (dataset, error) {
+	datasetDir := defaultDatasetDir
 	queries, err := loadParquet[TextInfo](fmt.Sprintf("%s/queries.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation dataset %s: %w", "queries.parquet", err)
 	}
 	corpus, err := loadParquet[TextInfo](fmt.Sprintf("%s/corpus.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation dataset %s: %w", "corpus.parquet", err)
 	}
 	answers, err := loadParquet[TextInfo](fmt.Sprintf("%s/answers.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation dataset %s: %w", "answers.parquet", err)
 	}
 	qrels, err := loadParquet[RelsInfo](fmt.Sprintf("%s/qrels.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation dataset %s: %w", "qrels.parquet", err)
 	}
 	qas, err := loadParquet[QaInfo](fmt.Sprintf("%s/qas.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation dataset %s: %w", "qas.parquet", err)
 	}
 
 	res := dataset{
@@ -96,7 +121,7 @@ func DefaultDataset() dataset {
 	for _, qi := range qas {
 		res.qas[qi.QID] = qi.AID
 	}
-	return res
+	return res, nil
 }
 
 // dataset represents the in-memory dataset structure
